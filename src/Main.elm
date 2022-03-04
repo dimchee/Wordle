@@ -4,7 +4,6 @@ import Browser
 import Html exposing (div, text)
 import Html.Attributes exposing (style)
 import String exposing (fromChar)
-import Browser.Events exposing (onKeyPress)
 import Json.Decode as Decode
 import Html exposing (button)
 import Html.Events exposing (onClick)
@@ -14,6 +13,7 @@ import Task
 import Words
 import Random
 import Array
+import Browser.Events exposing (onKeyDown)
 
 -- TODO make virtual keyboard?
 -- TODO animations like this? https://dev.to/lucamug/elm-beginners-tutorial-how-to-make-animated-snackbars-with-zero-css-12g1
@@ -33,6 +33,7 @@ type Msg = Gues | Key Char | DelChar | Won | Lose | ResetStatus | NewGame Word |
 init : Status -> () -> (Model, Cmd Msg)
 init status _ = (Loading status, Random.generate (\ind -> Array.get ind Words.commonWords |> Maybe.withDefault "debug" |> String.toList |> Word |> NewGame) <| Random.int 0 <| Array.length Words.commonWords)
 
+main : Program () Model Msg
 main = Browser.element
     { init = init Ok
     , update = update
@@ -42,21 +43,26 @@ main = Browser.element
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ = Decode.field "key" Decode.string |> Decode.map keyToMsg |> onKeyPress
+subscriptions _ = Decode.field "key" Decode.string |> Decode.map keyToMsg |> onKeyDown
 
 keyToMsg : String -> Msg
 keyToMsg string = case String.uncons string of
     Just (char, "") -> Key char
     _ -> case string of
        "Enter" -> Gues
+       "Backspace" -> DelChar
        _ -> Nil
 
 
+validGues : List Char -> Bool
 validGues l = List.member (List.reverse l |> String.fromList |> String.toLower) Words.allWords
 
+delay : Float -> b -> Cmd b
 delay time msg = Process.sleep time |> Task.perform (\_ -> msg)
+resetStatus : Cmd Msg
 resetStatus = delay 5000 ResetStatus
 
+update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case model of
     Loading status -> case msg of
        NewGame w -> (Game status <| State [] [] w, Cmd.none)
@@ -82,11 +88,13 @@ zip : List a -> List b -> List (a, b)
 zip = List.map2 Tuple.pair
 
 type Color = X | Y | G
+toHtmlColor : Color -> String
 toHtmlColor clr = case clr of 
     X -> "gray"
     Y -> "yellow"
     G -> "green"
 
+toColors : List b -> List b -> List Color
 toColors ans gues = 
     let
         greens = List.map2 (==) ans gues
@@ -104,9 +112,11 @@ toColors ans gues =
             (newMask x ans mask |> Tuple.second, toColor x y mask :: sol)
         ) (greens, []) |> Tuple.second |> List.reverse
 
+toRow : Word -> Word -> Html.Html msg
 toRow (Word ans) (Word gues) =
     List.map2 (\col -> cell (toHtmlColor col) << Just) (toColors ans gues) gues |> row
 
+cell : String -> Maybe Char -> Html.Html msg
 cell color letter = div
     [ style "background-color" color -- could be background-color (as in original)
 
@@ -127,6 +137,7 @@ cell color letter = div
         Nothing -> []
         Just l -> [ text (l |> fromChar) ]
 
+row : List (Html.Html msg) -> Html.Html msg
 row cells = div
     [ style "display" "flex"
     , style "flex-wrap" "nowrap"
@@ -137,15 +148,21 @@ row cells = div
     , style "height" "100%"
     ] cells
 
+bgColor : String
 bgColor = "#202020"
+rowFromGues : List Char -> Html.Html msg
 rowFromGues =  List.reverse >> List.map Just >> fill 5 Nothing >> List.map (cell bgColor) >> row
 
+rowDefault : Html.Html msg
 rowDefault = rowFromGues []
 
+fill : Int -> b -> List b -> List b
 fill n empty l = l ++ List.repeat (n - List.length l) empty
 
+tableRows : { a | gues : List Char, word : Word, gueses : List Word } -> List (Html.Html msg)
 tableRows state = fill 6 rowDefault <| List.reverse <| rowFromGues state.gues :: List.map (toRow state.word) state.gueses
 
+table : { a | gues : List Char, word : Word, gueses : List Word } -> Html.Html Msg
 table state = div
     [ style "display" "flex"
     , style "flex-direction" "column"
@@ -156,6 +173,7 @@ table state = div
     , style "height" "420px"
     ] (tableRows state ++ [ button [ onClick DelChar] [ text "Delete Char"] ])
 
+view : Model -> Html.Html Msg
 view model = div
     [ style "display" "flex"
     , style "justify-content" "center"
@@ -182,8 +200,10 @@ view model = div
         ]
     ]
 
+toString : Word -> String
 toString (Word l) = String.fromList l
 
+statusDiv : Model -> Html.Html msg
 statusDiv model =
     let status = case model of
             Loading stat -> stat
